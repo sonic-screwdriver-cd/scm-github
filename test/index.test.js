@@ -335,6 +335,41 @@ describe('index', () => {
         });
     });
 
+    describe('stats', () => {
+        let configSuccess;
+
+        beforeEach(() => {
+            configSuccess = {
+                scmUrl: 'git@github.com:screwdriver-cd/models.git',
+                sha: 'ccc49349d3cffbd12ea9e3d41521480b4aa5de5f',
+                buildStatus: 'SUCCESS',
+                token: 'somerandomtoken'
+            };
+        });
+
+        it('returns the correct stats', () => {
+            const err = new Error('githubError');
+
+            githubMock.repos.createStatus.yieldsAsync(err);
+
+            return scm.updateCommitStatus(configSuccess)
+            .then(() => {
+                assert.fail('This should not fail the test');
+            })
+            .catch(() => {
+                // Because averageTime isn't deterministic on how long it will take,
+                // will need to check each value separately.
+                const stats = scm.stats();
+
+                assert.strictEqual(stats.requests.total, 1);
+                assert.strictEqual(stats.requests.timeouts, 0);
+                assert.strictEqual(stats.requests.success, 0);
+                assert.strictEqual(stats.requests.failure, 1);
+                assert.strictEqual(stats.breaker.isClosed, true);
+            });
+        });
+    });
+
     describe('getFile', () => {
         const scmUrl = 'git@github.com:screwdriver-cd/models.git';
         const content = `IyB3b3JrZmxvdzoKIyAgICAgLSBwdWJsaXNoCgpqb2JzOgogICAgbWFpbjoK\n
