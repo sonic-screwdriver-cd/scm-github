@@ -751,4 +751,17 @@ jobs:
             });
         });
     });
+
+    describe('decorateUrl', () => {
+        it('decorates a complete ssh url', () => {
+            const scmUrl = 'git@github.com:iAm/theCaptain.git#boat';
+            const result = scm.decorateUrl(scmUrl);
+
+            assert.deepEqual(result, {
+                subtitle: 'boat',
+                title: 'iAm:theCaptain',
+                url: 'https://github.com/iAm/theCaptain/tree/boat'
+            });
+        });
+    });
 });

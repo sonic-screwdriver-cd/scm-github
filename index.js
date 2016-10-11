@@ -333,6 +333,24 @@ class GithubScm extends Scm {
     }
 
     /**
+     * Decorate a given SCM URL with additional data to better display
+     * related information. If a branch suffix is not provided, it will default
+     * to the master branch
+     * @method decorateUrl
+     * @param  {String}    scmUrl The scm url, of the form git@github.com:owner/repo.git
+     * @return {Object}
+     */
+    decorateUrl(scmUrl) {
+        const scmInfo = getInfo(scmUrl);
+
+        return {
+            subtitle: scmInfo.branch,
+            title: `${scmInfo.user}:${scmInfo.repo}`,
+            url: `https://${scmInfo.host}/${scmInfo.user}/${scmInfo.repo}/tree/${scmInfo.branch}`
+        };
+    }
+
+    /**
      * Given a SCM webhook payload & its associated headers, aggregate the
      * necessary data to execute a Screwdriver job with.
      * @method parseHook
