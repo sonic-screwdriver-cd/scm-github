@@ -380,6 +380,27 @@ class GithubScm extends Scm {
             throw new Error(`Event ${type} not supported`);
         }
     }
+
+    /**
+     * Parses a SCM URL into a screwdriver-representable ID
+     *
+     * 'token' is required, since it is necessary to lookup the SCM ID by
+     * communicating with said SCM service.
+     * @method parseUrl
+     * @param  {Object} config         Config object
+     * @param  {String} config.scmUrl  The scmUrl to parse
+     * @param  {String} config.token   The token used to authenticate to the SCM service
+     * @return {Promise}               Resolves to an ID of 'serviceName:repoId:branchName'
+     */
+    parseUrl(config) {
+        const scmInfo = getInfo(config.scmUrl);
+
+        // eslint-disable-next-line no-underscore-dangle
+        return this._getRepoInfo(scmInfo, config.token)
+        .then((repoInfo) =>
+            `${scmInfo.host}:${repoInfo.id}:${scmInfo.branch}`
+        );
+    }
 }
 
 module.exports = GithubScm;

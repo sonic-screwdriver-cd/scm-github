@@ -706,4 +706,49 @@ jobs:
             assert.throws(functionToAssert, /Event other_event not supported/);
         });
     });
+
+    describe('parseUrl', () => {
+        const repoData = {
+            id: 8675309,
+            full_name: 'iAm/theCaptain'
+        };
+        const token = 'mygithubapitoken';
+        const repoInfo = {
+            host: 'github.com',
+            repo: 'theCaptain',
+            user: 'iAm'
+        };
+
+        it('parses a complete ssh url', () => {
+            const scmUrl = 'git@github.com:iAm/theCaptain.git#boat';
+
+            githubMock.repos.get.yieldsAsync(null, repoData);
+
+            return scm.parseUrl({
+                scmUrl,
+                token
+            }).then(result => {
+                assert.strictEqual(result, 'github.com:8675309:boat');
+
+                assert.calledWith(githubMock.repos.get, sinon.match(repoInfo));
+                assert.calledWith(githubMock.repos.get, sinon.match({ branch: 'boat' }));
+            });
+        });
+
+        it('parses a ssh url, defaulting the branch to master', () => {
+            const scmUrl = 'git@github.com:iAm/theCaptain.git';
+
+            githubMock.repos.get.yieldsAsync(null, repoData);
+
+            return scm.parseUrl({
+                scmUrl,
+                token
+            }).then(result => {
+                assert.strictEqual(result, 'github.com:8675309:master');
+
+                assert.calledWith(githubMock.repos.get, sinon.match(repoInfo));
+                assert.calledWith(githubMock.repos.get, sinon.match({ branch: 'master' }));
+            });
+        });
+    });
 });
