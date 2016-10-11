@@ -4,10 +4,10 @@ const Github = require('github');
 const hoek = require('hoek');
 const schema = require('screwdriver-data-schema');
 const Scm = require('screwdriver-scm-base');
-const MATCH_COMPONENT_BRANCH_NAME = 4;
-const MATCH_COMPONENT_REPO_NAME = 3;
-const MATCH_COMPONENT_USER_NAME = 2;
-const MATCH_COMPONENT_HOST_NAME = 1;
+const MATCH_COMPONENT_BRANCH_NAME = 6;
+const MATCH_COMPONENT_REPO_NAME = 5;
+const MATCH_COMPONENT_USER_NAME = 4;
+const MATCH_COMPONENT_HOST_NAME = 3;
 const STATE_MAP = {
     SUCCESS: 'success',
     RUNNING: 'pending',
@@ -33,7 +33,7 @@ const SUPPORTED_PR_ACTIONS = [
 * @return {Object}             An object with the user, repo, and branch
 */
 function getInfo(scmUrl) {
-    const matched = (schema.config.regex.SCM_URL).exec(scmUrl);
+    const matched = (schema.config.regex.CHECKOUT_URL).exec(scmUrl);
 
     // Check if regex did not pass
     if (!matched) {
@@ -47,6 +47,19 @@ function getInfo(scmUrl) {
         repo: matched[MATCH_COMPONENT_REPO_NAME],
         host: matched[MATCH_COMPONENT_HOST_NAME],
         branch: branch.slice(1)
+    };
+}
+
+function parseUri(scmUri) {
+    const parts = scmUri.split(':');
+    const host = parts[0];
+    const id = parts[1];
+    const branch = parts[2];
+
+    return {
+        branch,
+        host,
+        id
     };
 }
 
@@ -89,81 +102,103 @@ class GithubScm extends Scm {
             breaker: config.breaker
         });
     }
-    /**
-    * Format the scmUrl for the specific source control
-    * @method formatScmUrl
-    * @param {String}    scmUrl        Scm Url to format properly
-    */
-    formatScmUrl(scmUrl) {
-        let result = scmUrl;
-        const branchName = getInfo(result).branch;
 
-        // Do not convert branch name to lowercase
-        result = result.split('#')[0].toLowerCase().concat(`#${branchName}`);
+    lookupScmUri(config) {
+        const scmUriParts = config.scmUri.split(':');
 
-        return result;
+        return new Promise((resolve, reject) => {
+            this.breaker.runCommand({
+                action: 'getById',
+                token: config.token,
+                params: { id: scmUriParts[1] }  // magic number
+            }, (error, data) => {
+                if (error) {
+                    return reject(error);
+                }
+
+                const repoNameParts = data.full_name.split('/');
+
+                return resolve({
+                    branch: scmUriParts[2],  // magic numbers
+                    host: scmUriParts[0],
+                    repo: repoNameParts[1],
+                    user: repoNameParts[0]
+                });
+            });
+        });
     }
 
     /**
     * Get a users permissions on a repository
     * @method _getPermissions
     * @param  {Object}   config            Configuration
-    * @param  {String}   config.scmUrl     The scmUrl to get permissions on
+    * @param  {String}   config.scmUri     The scmUri to get permissions on
     * @param  {String}   config.token      The token used to authenticate to the SCM
     * @return {Promise}
     */
     _getPermissions(config) {
-        const scmInfo = getInfo(config.scmUrl);
+        return this.lookupScmUri({
+            scmUri: config.scmUri,
+            token: config.token
+        }).then((scmInfo) =>
+            new Promise((resolve, reject) => {
+                this.breaker.runCommand({
+                    action: 'get',
+                    token: config.token,
+                    params: {
+                        repo: scmInfo.repo,
+                        user: scmInfo.user
+                    }
+                }, (error, data) => {
+                    if (error) {
+                        return reject(error);
+                    }
 
-        return new Promise((resolve, reject) => {
-            this.breaker.runCommand({
-                action: 'get',
-                token: config.token,
-                params: {
-                    user: scmInfo.user,
-                    repo: scmInfo.repo
-                }
-            }, (error, data) => {
-                if (error) {
-                    return reject(error);
-                }
-
-                return resolve(data.permissions);
-            });
-        });
+                    return resolve(data.permissions);
+                });
+            })
+        );
     }
 
     /**
      * Get a commit sha for a specific repo#branch
      * @method getCommitSha
      * @param  {Object}   config            Configuration
-     * @param  {String}   config.scmUrl     The scmUrl to get commit sha of
+     * @param  {String}   config.scmUri     The scmUri to get commit sha of
      * @param  {String}   config.token      The token used to authenticate to the SCM
      * @return {Promise}
      */
     _getCommitSha(config) {
-        const scmInfo = getInfo(config.scmUrl);
+        return this.lookupScmUri({
+            scmUri: config.scmUri,
+            token: config.token
+        }).then((scmInfo) =>
+            new Promise((resolve, reject) => {
+                this.breaker.runCommand({
+                    action: 'getBranch',
+                    token: config.token,
+                    params: {
+                        branch: scmInfo.branch,
+                        host: scmInfo.host,
+                        repo: scmInfo.repo,
+                        user: scmInfo.user
+                    }
+                }, (error, data) => {
+                    if (error) {
+                        return reject(error);
+                    }
 
-        return new Promise((resolve, reject) => {
-            this.breaker.runCommand({
-                action: 'getBranch',
-                token: config.token,
-                params: scmInfo
-            }, (error, data) => {
-                if (error) {
-                    return reject(error);
-                }
-
-                return resolve(data.commit.sha);
-            });
-        });
+                    return resolve(data.commit.sha);
+                });
+            })
+        );
     }
 
     /**
     * Update the commit status for a given repo and sha
     * @method updateCommitStatus
     * @param  {Object}   config              Configuration
-    * @param  {String}   config.scmUrl       The scmUrl to get permissions on
+    * @param  {String}   config.scmUri       The scmUri to get permissions on
     * @param  {String}   config.sha          The sha to apply the status to
     * @param  {String}   config.buildStatus  The build status used for figuring out the commit status to set
     * @param  {String}   config.token        The token used to authenticate to the SCM
@@ -172,32 +207,36 @@ class GithubScm extends Scm {
     * @return {Promise}
     */
     _updateCommitStatus(config) {
-        const scmInfo = getInfo(config.scmUrl);
-        const context = config.jobName ? `Screwdriver/${config.jobName}` : 'Screwdriver';
-        const params = {
-            user: scmInfo.user,
-            repo: scmInfo.repo,
-            sha: config.sha,
-            state: STATE_MAP[config.buildStatus] || 'failure',
-            description: DESCRIPTION_MAP[config.buildStatus] || 'failure',
-            context
-        };
+        return this.lookupScmUri({
+            scmUri: config.scmUri,
+            token: config.token
+        }).then((scmInfo) => {
+            const context = config.jobName ? `Screwdriver/${config.jobName}` : 'Screwdriver';
+            const params = {
+                context,
+                description: DESCRIPTION_MAP[config.buildStatus] || 'failure',
+                repo: scmInfo.repo,
+                sha: config.sha,
+                state: STATE_MAP[config.buildStatus] || 'failure',
+                user: scmInfo.user
+            };
 
-        if (config.url) {
-            params.target_url = config.url;
-        }
+            if (config.url) {
+                params.target_url = config.url;
+            }
 
-        return new Promise((resolve, reject) => {
-            this.breaker.runCommand({
-                action: 'createStatus',
-                token: config.token,
-                params
-            }, (error, data) => {
-                if (error) {
-                    return reject(error);
-                }
+            return new Promise((resolve, reject) => {
+                this.breaker.runCommand({
+                    action: 'createStatus',
+                    token: config.token,
+                    params
+                }, (error, data) => {
+                    if (error) {
+                        return reject(error);
+                    }
 
-                return resolve(data);
+                    return resolve(data);
+                });
             });
         });
     }
@@ -206,39 +245,42 @@ class GithubScm extends Scm {
     * Fetch content of a file from github
     * @method getFile
     * @param  {Object}   config              Configuration
-    * @param  {String}   config.scmUrl       The scmUrl to get permissions on
+    * @param  {String}   config.scmUri       The scmUri to get permissions on
     * @param  {String}   config.path         The file in the repo to fetch
     * @param  {String}   config.token        The token used to authenticate to the SCM
     * @param  {String}   config.ref          The reference to the SCM, either branch or sha
     * @return {Promise}
     */
     _getFile(config) {
-        const scmInfo = getInfo(config.scmUrl);
+        return this.lookupScmUri({
+            scmUri: config.scmUri,
+            token: config.token
+        }).then((scmInfo) =>
+            new Promise((resolve, reject) => {
+                this.breaker.runCommand({
+                    action: 'getContent',
+                    token: config.token,
+                    params: {
+                        user: scmInfo.user,
+                        repo: scmInfo.repo,
+                        path: config.path,
+                        ref: config.ref || scmInfo.branch
+                    }
+                }, (error, data) => {
+                    if (error) {
+                        return reject(error);
+                    }
 
-        return new Promise((resolve, reject) => {
-            this.breaker.runCommand({
-                action: 'getContent',
-                token: config.token,
-                params: {
-                    user: scmInfo.user,
-                    repo: scmInfo.repo,
-                    path: config.path,
-                    ref: config.ref || scmInfo.branch
-                }
-            }, (error, data) => {
-                if (error) {
-                    return reject(error);
-                }
+                    if (data.type !== 'file') {
+                        return reject(new Error(`Path (${config.path}) does not point to file`));
+                    }
 
-                if (data.type !== 'file') {
-                    return reject(new Error(`Path (${config.path}) does not point to file`));
-                }
+                    const contents = new Buffer(data.content, data.encoding).toString();
 
-                const contents = new Buffer(data.content, data.encoding).toString();
-
-                return resolve(contents);
-            });
-        });
+                    return resolve(contents);
+                });
+            })
+        );
     }
 
     /**
@@ -310,29 +352,6 @@ class GithubScm extends Scm {
     }
 
     /**
-     * Get repository object for storing new pipeline
-     * @method _getRepoId
-     * @param  {Object}    config        Configuration
-     * @param  {String}    config.scmUrl The scmUrl to get permissions on
-     * @param  {String}    config.token  The token used to authenticate to the SCM
-     * @return {Promise}
-     */
-    _getRepoId(config) {
-        const scmInfo = getInfo(config.scmUrl);
-
-        return Promise.all([
-            // eslint-disable-next-line no-underscore-dangle
-            this._getRepoInfo(scmInfo, config.token),
-            // eslint-disable-next-line no-underscore-dangle
-            this._getBranchUrl(scmInfo, config.token)
-        ]).then(([repoInfo, branchUrl]) => ({
-            id: `${scmInfo.host}:${repoInfo.id}:${scmInfo.branch}`,
-            name: repoInfo.full_name,
-            url: branchUrl
-        }));
-    }
-
-    /**
      * Decorate a given SCM URL with additional data to better display
      * related information. If a branch suffix is not provided, it will default
      * to the master branch
@@ -363,35 +382,35 @@ class GithubScm extends Scm {
      */
     parseHook(webhookPayload, payloadHeaders) {
         const type = payloadHeaders['x-github-event'];
-        const url = hoek.reach(webhookPayload, 'repository.ssh_url');
+        const checkoutUrl = hoek.reach(webhookPayload, 'repository.ssh_url');
 
         switch (type) {
         case 'pull_request': {
             let action = hoek.reach(webhookPayload, 'action');
-            const prNumber = hoek.reach(webhookPayload, 'pull_request.number');
+            const prNum = hoek.reach(webhookPayload, 'pull_request.number');
 
             if (!SUPPORTED_PR_ACTIONS.includes(action)) {
                 action = 'closed';
             }
 
             return {
-                action: `pr:${action}`,
+                action,
                 branch: hoek.reach(webhookPayload, 'pull_request.base.ref'),
-                url,
-                prNumber,
-                prRef: `${url}#pull/${prNumber}/merge`,
+                checkoutUrl,
+                prNum,
+                prRef: `${checkoutUrl}#pull/${prNum}/merge`,
                 sha: hoek.reach(webhookPayload, 'pull_request.head.sha'),
-                type,
+                type: 'pr',
                 username: hoek.reach(webhookPayload, 'pull_request.user.login')
             };
         }
         case 'push':
             return {
-                action: 'repo:push',
+                action: 'opened',
                 branch: hoek.reach(webhookPayload, 'ref').replace(/^refs\/heads\//, ''),
-                url: hoek.reach(webhookPayload, 'repository.ssh_url'),
+                checkoutUrl: hoek.reach(webhookPayload, 'repository.ssh_url'),
                 sha: hoek.reach(webhookPayload, 'after'),
-                type,
+                type: 'repo',
                 username: hoek.reach(webhookPayload, 'sender.login')
             };
         default:

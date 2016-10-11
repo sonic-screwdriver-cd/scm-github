@@ -27,9 +27,10 @@ describe('index', () => {
         githubMock = {
             authenticate: sinon.stub(),
             repos: {
-                get: sinon.stub(),
                 createStatus: sinon.stub(),
+                get: sinon.stub(),
                 getBranch: sinon.stub(),
+                getById: sinon.stub(),
                 getContent: sinon.stub()
             }
         };
@@ -57,87 +58,85 @@ describe('index', () => {
     });
 
     it('extends base class', () => {
-        assert.isFunction(scm.formatScmUrl);
         assert.isFunction(scm.getPermissions);
         assert.isFunction(scm.getCommitSha);
         assert.isFunction(scm.updateCommitStatus);
     });
 
-    describe('formatScmUrl', () => {
-        it('adds master when there is no branch', () => {
-            const scmUrl = 'git@github.com:screwdriver-cd/scm-github.git';
-            const expectedScmUrl = 'git@github.com:screwdriver-cd/scm-github.git#master';
-
-            assert.strictEqual(scm.formatScmUrl(scmUrl), expectedScmUrl);
-        });
-
-        it('lowercases scmUrl and adds master when there is no branch', () => {
-            const scmUrl = 'git@github.com:Screwdriver-cd/scm-github.git';
-            const expectedScmUrl = 'git@github.com:screwdriver-cd/scm-github.git#master';
-
-            assert.strictEqual(scm.formatScmUrl(scmUrl), expectedScmUrl);
-        });
-
-        it('lowercases scmUrl and uses the branch without changing', () => {
-            const scmUrl = 'git@github.com:Screwdriver-cd/scm-github.git#Test';
-            const expectedScmUrl = 'git@github.com:screwdriver-cd/scm-github.git#Test';
-
-            assert.strictEqual(scm.formatScmUrl(scmUrl), expectedScmUrl);
-        });
-
-        it('scm url does not match regex', () => {
-            const scmUrl = 'foo';
-
-            assert.throws(() => scm.formatScmUrl(scmUrl), 'Invalid scmUrl: foo');
-        });
-    });
-
     describe('getCommitSha', () => {
-        const scmUrl = 'git@github.com:screwdriver-cd/models.git#master';
+        const scmUri = 'github.com:920414:master';
         const branch = {
             commit: {
                 sha: '1234567'
             }
         };
         const config = {
-            scmUrl,
+            scmUri,
             token: 'somerandomtoken'
         };
 
         it('promises to get the commit sha', () => {
             githubMock.repos.getBranch.yieldsAsync(null, branch);
+            githubMock.repos.getById.yieldsAsync(null, {
+                full_name: 'screwdriver-cd/models'
+            });
 
             return scm.getCommitSha(config)
-            .catch(() => {
-                assert.fail('This should not fail the test');
-            })
             .then((data) => {
+                assert.deepEqual(data, branch.commit.sha);
+
                 assert.calledWith(githubMock.repos.getBranch, {
                     user: 'screwdriver-cd',
                     repo: 'models',
                     host: 'github.com',
                     branch: 'master'
                 });
-
+                assert.calledWith(githubMock.repos.getById, {
+                    id: '920414'
+                });
                 assert.calledWith(githubMock.authenticate, {
                     type: 'oauth',
                     token: config.token
                 });
-
-                assert.deepEqual(data, branch.commit.sha);
             });
         });
 
-        it('fails when github fails', () => {
+        it('fails when unable to get a repo by ID', () => {
             const error = new Error('githubBreaking');
 
-            githubMock.repos.getBranch.yieldsAsync(error);
+            githubMock.repos.getById.yieldsAsync(error);
 
             return scm.getCommitSha(config)
             .then(() => {
                 assert.fail('This should not fail the test');
             })
             .catch((err) => {
+                assert.deepEqual(err, error);
+
+                assert.calledWith(githubMock.repos.getById, {
+                    id: '920414'
+                });
+
+                assert.calledWith(githubMock.authenticate, {
+                    type: 'oauth',
+                    token: config.token
+                });
+            });
+        });
+
+        it('fails when unable to get the branch info from a repo', () => {
+            const error = new Error('githubBreaking');
+
+            githubMock.repos.getById.yieldsAsync(null, {
+                full_name: 'screwdriver-cd/models'
+            });
+            githubMock.repos.getBranch.yieldsAsync(error);
+
+            return scm.getCommitSha(config).then(() => {
+                assert.fail('This should not fail the test');
+            }).catch((err) => {
+                assert.deepEqual(err, error);
+
                 assert.calledWith(githubMock.repos.getBranch, {
                     user: 'screwdriver-cd',
                     repo: 'models',
@@ -145,18 +144,20 @@ describe('index', () => {
                     branch: 'master'
                 });
 
+                assert.calledWith(githubMock.repos.getById, {
+                    id: '920414'
+                });
+
                 assert.calledWith(githubMock.authenticate, {
                     type: 'oauth',
                     token: config.token
                 });
-
-                assert.deepEqual(err, error);
             });
         });
     });
 
     describe('getPermissions', () => {
-        const scmUrl = 'git@github.com:screwdriver-cd/models.git';
+        const scmUri = 'github.com:359478:master';
         const repo = {
             permissions: {
                 admin: true,
@@ -165,15 +166,24 @@ describe('index', () => {
             }
         };
         const config = {
-            scmUrl,
+            scmUri,
             token: 'somerandomtoken'
         };
 
         it('promises to get permissions', () => {
+            githubMock.repos.getById.yieldsAsync(null, {
+                full_name: 'screwdriver-cd/models'
+            });
             githubMock.repos.get.yieldsAsync(null, repo);
 
             return scm.getPermissions(config)
             .then((data) => {
+                assert.deepEqual(data, repo.permissions);
+
+                assert.calledWith(githubMock.repos.getById, {
+                    id: '359478'
+                });
+
                 assert.calledWith(githubMock.repos.get, {
                     user: 'screwdriver-cd',
                     repo: 'models'
@@ -183,41 +193,90 @@ describe('index', () => {
                     type: 'oauth',
                     token: config.token
                 });
-
-                assert.deepEqual(data, repo.permissions);
-            })
-            .catch(() => {
-                assert.fail('This should not fail the test');
             });
         });
 
         it('returns an error when github command fails', () => {
             const err = new Error('githubError');
 
-            githubMock.repos.get.yieldsAsync(err);
+            githubMock.repos.getById.yieldsAsync(err);
 
             return scm.getPermissions(config)
             .then(() => {
                 assert.fail('This should not fail the test');
             })
             .catch(error => {
-                assert.calledWith(githubMock.repos.get, {
-                    user: 'screwdriver-cd',
-                    repo: 'models'
+                assert.deepEqual(error, err);
+
+                assert.calledWith(githubMock.repos.getById, {
+                    id: '359478'
                 });
 
                 assert.calledWith(githubMock.authenticate, {
                     type: 'oauth',
                     token: config.token
                 });
+            });
+        });
+    });
 
-                assert.deepEqual(error, err);
+    describe('lookupScmUri', () => {
+        const scmUri = 'github.com:23498:targetBranch';
+
+        it('looks up a repo by SCM URI', () => {
+            const testResponse = {
+                full_name: 'screwdriver-cd/models'
+            };
+
+            githubMock.repos.getById.yieldsAsync(null, testResponse);
+
+            return scm.lookupScmUri({
+                scmUri,
+                token: 'sometoken'
+            }).then((repoData) => {
+                assert.deepEqual(repoData, {
+                    branch: 'targetBranch',
+                    host: 'github.com',
+                    repo: 'models',
+                    user: 'screwdriver-cd'
+                });
+
+                assert.calledWith(githubMock.repos.getById, {
+                    id: '23498'
+                });
+                assert.calledWith(githubMock.authenticate, {
+                    type: 'oauth',
+                    token: 'sometoken'
+                });
+            });
+        });
+
+        it('rejects when github command fails', () => {
+            const testError = new Error('githubError');
+
+            githubMock.repos.getById.yieldsAsync(testError);
+
+            return scm.lookupScmUri({
+                scmUri,
+                token: 'sometoken'
+            }).then(() => {
+                assert.fail('This should not fail the test');
+            }, (error) => {
+                assert.deepEqual(error, testError);
+
+                assert.calledWith(githubMock.repos.getById, {
+                    id: '23498'
+                });
+                assert.calledWith(githubMock.authenticate, {
+                    type: 'oauth',
+                    token: 'sometoken'
+                });
             });
         });
     });
 
     describe('updateCommitStatus', () => {
-        const scmUrl = 'git@github.com:screwdriver-cd/models.git';
+        const scmUri = 'github.com:14052:master';
         const data = {
             permissions: {
                 admin: true,
@@ -225,127 +284,112 @@ describe('index', () => {
                 pull: false
             }
         };
-        let configSuccess;
-        const configFailure = {
-            scmUrl,
-            sha: 'ccc49349d3cffbd12ea9e3d41521480b4aa5de5f',
-            buildStatus: 'FAILURE',
-            token: 'somerandomtoken'
-        };
+        let config;
 
         beforeEach(() => {
-            configSuccess = {
-                scmUrl,
+            config = {
+                scmUri,
                 sha: 'ccc49349d3cffbd12ea9e3d41521480b4aa5de5f',
                 buildStatus: 'SUCCESS',
                 token: 'somerandomtoken'
             };
+
+            githubMock.repos.getById.yieldsAsync(null, {
+                full_name: 'screwdriver-cd/models'
+            });
+            githubMock.repos.createStatus.yieldsAsync(null, data);
         });
 
-        it('promises to update commit status on success', () => {
-            githubMock.repos.createStatus.yieldsAsync(null, data);
-
-            return scm.updateCommitStatus(configSuccess)
+        it('promises to update commit status on success', () =>
+            scm.updateCommitStatus(config)
             .then((result) => {
+                assert.deepEqual(result, data);
+
+                assert.calledWith(githubMock.repos.getById, {
+                    id: '14052'
+                });
                 assert.calledWith(githubMock.repos.createStatus, {
                     user: 'screwdriver-cd',
                     repo: 'models',
-                    sha: configSuccess.sha,
+                    sha: config.sha,
                     state: 'success',
                     description: 'Everything looks good!',
                     context: 'Screwdriver'
                 });
-
                 assert.calledWith(githubMock.authenticate, {
                     type: 'oauth',
-                    token: configSuccess.token
+                    token: config.token
                 });
-
-                assert.deepEqual(result, data);
             })
-            .catch(() => {
-                assert.fail('This should not fail the test');
-            });
-        });
+        );
 
         it('sets a target_url when id passed in', () => {
-            githubMock.repos.createStatus.yieldsAsync(null, data);
-            configSuccess.url = 'http://localhost/v3/builds/1234/logs';
+            config.url = 'http://localhost/v3/builds/1234/logs';
 
-            return scm.updateCommitStatus(configSuccess)
-                .then((result) => {
-                    assert.calledWith(githubMock.repos.createStatus, {
-                        user: 'screwdriver-cd',
-                        repo: 'models',
-                        sha: configSuccess.sha,
-                        state: 'success',
-                        description: 'Everything looks good!',
-                        context: 'Screwdriver',
-                        target_url: 'http://localhost/v3/builds/1234/logs'
-                    });
-
-                    assert.calledWith(githubMock.authenticate, {
-                        type: 'oauth',
-                        token: configSuccess.token
-                    });
-
-                    assert.deepEqual(result, data);
-                })
-                .catch((err) => {
-                    assert.fail(err, 'This should not fail the test');
-                });
-        });
-
-        it('sets a better context when jobName passed in', () => {
-            githubMock.repos.createStatus.yieldsAsync(null, data);
-            configSuccess.jobName = 'PR-15';
-
-            return scm.updateCommitStatus(configSuccess)
-                .then((result) => {
-                    assert.calledWith(githubMock.repos.createStatus, {
-                        user: 'screwdriver-cd',
-                        repo: 'models',
-                        sha: configSuccess.sha,
-                        state: 'success',
-                        description: 'Everything looks good!',
-                        context: 'Screwdriver/PR-15'
-                    });
-
-                    assert.calledWith(githubMock.authenticate, {
-                        type: 'oauth',
-                        token: configSuccess.token
-                    });
-
-                    assert.deepEqual(result, data);
-                })
-                .catch((err) => {
-                    assert.fail(err, 'This should not fail the test');
-                });
-        });
-
-        it('promises to update commit status on failure', () => {
-            githubMock.repos.createStatus.yieldsAsync(null, data);
-
-            return scm.updateCommitStatus(configFailure)
-            .catch(() => {
-                assert.fail('This should not fail the test');
-            })
+            return scm.updateCommitStatus(config)
             .then((result) => {
+                assert.deepEqual(result, data);
+
+                assert.calledWith(githubMock.repos.getById, {
+                    id: '14052'
+                });
                 assert.calledWith(githubMock.repos.createStatus, {
                     user: 'screwdriver-cd',
                     repo: 'models',
-                    sha: configFailure.sha,
+                    sha: config.sha,
+                    state: 'success',
+                    description: 'Everything looks good!',
+                    context: 'Screwdriver',
+                    target_url: 'http://localhost/v3/builds/1234/logs'
+                });
+                assert.calledWith(githubMock.authenticate, {
+                    type: 'oauth',
+                    token: config.token
+                });
+            });
+        });
+
+        it('sets a better context when jobName passed in', () => {
+            config.jobName = 'PR-15';
+
+            return scm.updateCommitStatus(config)
+            .then((result) => {
+                assert.deepEqual(result, data);
+
+                assert.calledWith(githubMock.repos.createStatus, {
+                    user: 'screwdriver-cd',
+                    repo: 'models',
+                    sha: config.sha,
+                    state: 'success',
+                    description: 'Everything looks good!',
+                    context: 'Screwdriver/PR-15'
+                });
+                assert.calledWith(githubMock.authenticate, {
+                    type: 'oauth',
+                    token: config.token
+                });
+            });
+        });
+
+        it('promises to update commit status on failure', () => {
+            config.buildStatus = 'FAILURE';
+
+            return scm.updateCommitStatus(config)
+            .then((result) => {
+                assert.deepEqual(result, data);
+
+                assert.calledWith(githubMock.repos.createStatus, {
+                    user: 'screwdriver-cd',
+                    repo: 'models',
+                    sha: config.sha,
                     state: 'failure',
                     description: 'Did not work as expected.',
                     context: 'Screwdriver'
                 });
-
                 assert.calledWith(githubMock.authenticate, {
                     type: 'oauth',
-                    token: configFailure.token
+                    token: config.token
                 });
-
-                assert.deepEqual(result, data);
             });
         });
 
@@ -354,57 +398,52 @@ describe('index', () => {
 
             githubMock.repos.createStatus.yieldsAsync(err);
 
-            return scm.updateCommitStatus(configSuccess)
+            return scm.updateCommitStatus(config)
             .then(() => {
                 assert.fail('This should not fail the test');
             })
             .catch(error => {
+                assert.deepEqual(error, err);
+
                 assert.calledWith(githubMock.repos.createStatus, {
                     user: 'screwdriver-cd',
                     repo: 'models',
-                    sha: configSuccess.sha,
+                    sha: config.sha,
                     state: 'success',
                     description: 'Everything looks good!',
                     context: 'Screwdriver'
                 });
-
                 assert.calledWith(githubMock.authenticate, {
                     type: 'oauth',
-                    token: configSuccess.token
+                    token: config.token
                 });
-
-                assert.deepEqual(error, err);
             });
         });
     });
 
     describe('stats', () => {
-        let configSuccess;
-
-        beforeEach(() => {
-            configSuccess = {
-                scmUrl: 'git@github.com:screwdriver-cd/models.git',
+        it('returns the correct stats', () => {
+            const config = {
+                scmUri: 'github.com:28476:master',
                 sha: 'ccc49349d3cffbd12ea9e3d41521480b4aa5de5f',
                 buildStatus: 'SUCCESS',
                 token: 'somerandomtoken'
             };
-        });
 
-        it('returns the correct stats', () => {
+            githubMock.repos.getById.yieldsAsync(null, {
+                full_name: 'screwdriver-cd/models'
+            });
             githubMock.repos.createStatus.yieldsAsync(null, {});
 
-            return scm.updateCommitStatus(configSuccess)
-            .catch(() => {
-                assert.fail('This should not fail the test');
-            })
+            return scm.updateCommitStatus(config)
             .then(() => {
                 // Because averageTime isn't deterministic on how long it will take,
                 // will need to check each value separately.
                 const stats = scm.stats();
 
-                assert.strictEqual(stats.requests.total, 1);
+                assert.strictEqual(stats.requests.total, 2);
                 assert.strictEqual(stats.requests.timeouts, 0);
-                assert.strictEqual(stats.requests.success, 1);
+                assert.strictEqual(stats.requests.success, 2);
                 assert.strictEqual(stats.requests.failure, 0);
                 assert.strictEqual(stats.breaker.isClosed, true);
             });
@@ -412,7 +451,7 @@ describe('index', () => {
     });
 
     describe('getFile', () => {
-        const scmUrl = 'git@github.com:screwdriver-cd/models.git';
+        const scmUri = 'github.com:146:master';
         const content = `IyB3b3JrZmxvdzoKIyAgICAgLSBwdWJsaXNoCgpqb2JzOgogICAgbWFpbjoK\n
 ICAgICAgICBpbWFnZTogbm9kZTo2CiAgICAgICAgc3RlcHM6CiAgICAgICAg\n
 ICAgIC0gaW5zdGFsbDogbnBtIGluc3RhbGwKICAgICAgICAgICAgLSB0ZXN0\n
@@ -447,39 +486,41 @@ jobs:
     #         publish: npm publish && git push origin --tags -q
 `;
         const config = {
-            scmUrl,
+            scmUri,
             path: 'screwdriver.yaml',
             token: 'somerandomtoken',
             ref: '46f1a0bd5592a2f9244ca321b129902a06b53e03'
         };
 
         const configNoRef = {
-            scmUrl,
+            scmUri,
             path: 'screwdriver.yaml',
             token: 'somerandomtoken'
         };
+
+        beforeEach(() => {
+            githubMock.repos.getById.yieldsAsync(null, {
+                full_name: 'screwdriver-cd/models'
+            });
+        });
 
         it('promises to get content when a ref is passed', () => {
             githubMock.repos.getContent.yieldsAsync(null, returnData);
 
             return scm.getFile(config)
-            .catch(() => {
-                assert.fail('This should not fail the test');
-            })
             .then((data) => {
+                assert.deepEqual(data, expectedYaml);
+
                 assert.calledWith(githubMock.repos.getContent, {
                     user: 'screwdriver-cd',
                     repo: 'models',
                     path: config.path,
                     ref: config.ref
                 });
-
                 assert.calledWith(githubMock.authenticate, {
                     type: 'oauth',
                     token: config.token
                 });
-
-                assert.deepEqual(data, expectedYaml);
             });
         });
 
@@ -487,10 +528,9 @@ jobs:
             githubMock.repos.getContent.yieldsAsync(null, returnData);
 
             return scm.getFile(configNoRef)
-            .catch(() => {
-                assert.fail('This should not fail the test');
-            })
             .then((data) => {
+                assert.deepEqual(data, expectedYaml);
+
                 assert.calledWith(githubMock.repos.getContent, {
                     user: 'screwdriver-cd',
                     repo: 'models',
@@ -502,8 +542,6 @@ jobs:
                     type: 'oauth',
                     token: config.token
                 });
-
-                assert.deepEqual(data, expectedYaml);
             });
         });
 
@@ -513,8 +551,9 @@ jobs:
             return scm.getFile(config)
             .then(() => {
                 assert.fail('This should not fail the test');
-            })
-            .catch((err) => {
+            }, (err) => {
+                assert.strictEqual(err.message, 'Path (screwdriver.yaml) does not point to file');
+
                 assert.calledWith(githubMock.repos.getContent, {
                     user: 'screwdriver-cd',
                     repo: 'models',
@@ -526,8 +565,6 @@ jobs:
                     type: 'oauth',
                     token: config.token
                 });
-
-                assert.strictEqual(err.message, 'Path (screwdriver.yaml) does not point to file');
             });
         });
 
@@ -539,8 +576,7 @@ jobs:
             return scm.getFile(config)
             .then(() => {
                 assert.fail('This should not fail the test');
-            })
-            .catch(error => {
+            }, (error) => {
                 assert.calledWith(githubMock.repos.getContent, {
                     user: 'screwdriver-cd',
                     repo: 'models',
@@ -558,77 +594,14 @@ jobs:
         });
     });
 
-    describe('getRepoId', () => {
-        const scmUrl = 'git@github.com:foo/bar.git#test';
-        const expectedRepoId = {
-            id: 'github.com:123456:test',
-            name: 'foo/bar',
-            url: 'https://github.com/foo/bar/tree/test'
-        };
-        const repoData = {
-            id: 123456,
-            full_name: 'foo/bar'
-        };
-        const branchData = {
-            // eslint-disable-next-line no-underscore-dangle
-            _links: {
-                html: 'https://github.com/foo/bar/tree/test'
-            }
-        };
-        const invalidData = {
-            error: true
-        };
-        const config = {
-            scmUrl,
-            token: 'somerandomtoken'
-        };
-
-        it('returns the correct repoId', () => {
-            githubMock.repos.get.yieldsAsync(null, repoData);
-            githubMock.repos.getBranch.yieldsAsync(null, branchData);
-
-            return scm.getRepoId(config)
-            .catch(() => {
-                assert.fail('This should not fail the test');
-            })
-            .then(repoId => {
-                assert.deepEqual(repoId, expectedRepoId);
-            });
-        });
-
-        it('returns an error when github get command fails', () => {
-            const err = new Error('githubError');
-
-            githubMock.repos.get.yieldsAsync(err, invalidData);
-            githubMock.repos.getBranch.yieldsAsync(err, branchData);
-
-            return scm.getRepoId(config)
-            .catch(error => {
-                assert.deepEqual(error, err);
-            });
-        });
-
-        it('returns an error when github getBranch command fails', () => {
-            const err = new Error('githubError');
-
-            githubMock.repos.get.yieldsAsync(null, repoData);
-            githubMock.repos.getBranch.yieldsAsync(err, invalidData);
-
-            return scm.getRepoId(config)
-            .catch(error => {
-                assert.deepEqual(error, err);
-            });
-        });
-    });
-
-    describe('parseHook', () => {
+    describe.only('parseHook', () => {
         const commonPullRequestParse = {
             branch: 'master',
-            url: 'git@github.com:baxterthehacker/public-repo.git',
-            prNumber: 1,
+            checkoutUrl: 'git@github.com:baxterthehacker/public-repo.git',
+            prNum: 1,
             prRef: 'git@github.com:baxterthehacker/public-repo.git#pull/1/merge',
             sha: '0d1a26e67d8f5eaf1f6ba5c57fc3c7d91ac0fd1c',
-            type: 'pull_request',
+            type: 'pr',
             username: 'baxterthehacker'
         };
         let payloadChecker;
@@ -647,11 +620,11 @@ jobs:
             const result = scm.parseHook(testPayloadPush, testHeaders);
 
             assert.deepEqual(result, {
-                action: 'repo:push',
+                action: 'opened',
                 branch: 'master',
-                url: 'git@github.com:baxterthehacker/public-repo.git',
+                checkoutUrl: 'git@github.com:baxterthehacker/public-repo.git',
                 sha: '0d1a26e67d8f5eaf1f6ba5c57fc3c7d91ac0fd1c',
-                type: 'push',
+                type: 'repo',
                 username: 'baxterthehacker'
             });
         });
@@ -663,7 +636,7 @@ jobs:
 
             payloadChecker(result);
             assert.calledWith(payloadChecker, sinon.match(commonPullRequestParse));
-            assert.calledWith(payloadChecker, sinon.match({ action: 'pr:opened' }));
+            assert.calledWith(payloadChecker, sinon.match({ action: 'opened' }));
         });
 
         it('parses a payload for a pull request being closed', () => {
@@ -673,9 +646,7 @@ jobs:
 
             payloadChecker(result);
             assert.calledWith(payloadChecker, sinon.match(commonPullRequestParse));
-            assert.calledWith(payloadChecker, sinon.match({ action: 'pr:closed' }));
-
-            assert.propertyVal(result, 'action', 'pr:closed');
+            assert.calledWith(payloadChecker, sinon.match({ action: 'closed' }));
         });
 
         it('parses a payload for a pull request being synchronized', () => {
@@ -685,7 +656,7 @@ jobs:
 
             payloadChecker(result);
             assert.calledWith(payloadChecker, sinon.match(commonPullRequestParse));
-            assert.calledWith(payloadChecker, sinon.match({ action: 'pr:synchronize' }));
+            assert.calledWith(payloadChecker, sinon.match({ action: 'synchronize' }));
         });
 
         it('treats a payload for a pull request event that is unsupported as closed', () => {
@@ -695,7 +666,7 @@ jobs:
 
             payloadChecker(result);
             assert.calledWith(payloadChecker, sinon.match(commonPullRequestParse));
-            assert.calledWith(payloadChecker, sinon.match({ action: 'pr:closed' }));
+            assert.calledWith(payloadChecker, sinon.match({ action: 'closed' }));
         });
 
         it('throws an error when parsing an unsupported payload', () => {
