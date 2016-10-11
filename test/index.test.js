@@ -3,6 +3,12 @@ const assert = require('chai').assert;
 const mockery = require('mockery');
 const sinon = require('sinon');
 
+const testPayloadClose = require('./data/github.pull_request.closed.json');
+const testPayloadOpen = require('./data/github.pull_request.opened.json');
+const testPayloadOther = require('./data/github.pull_request.labeled.json');
+const testPayloadPush = require('./data/github.push.json');
+const testPayloadSync = require('./data/github.pull_request.synchronize.json');
+
 sinon.assert.expose(assert, { prefix: '' });
 
 describe('index', () => {
@@ -612,6 +618,92 @@ jobs:
             .catch(error => {
                 assert.deepEqual(error, err);
             });
+        });
+    });
+
+    describe('parseHook', () => {
+        const commonPullRequestParse = {
+            branch: 'master',
+            url: 'git@github.com:baxterthehacker/public-repo.git',
+            prNumber: 1,
+            prRef: 'git@github.com:baxterthehacker/public-repo.git#pull/1/merge',
+            sha: '0d1a26e67d8f5eaf1f6ba5c57fc3c7d91ac0fd1c',
+            type: 'pull_request',
+            username: 'baxterthehacker'
+        };
+        let payloadChecker;
+        let testHeaders;
+
+        beforeEach(() => {
+            testHeaders = {
+                'x-github-event': null
+            };
+
+            payloadChecker = sinon.stub();
+        });
+
+        it('parses a payload for a push event payload', () => {
+            testHeaders['x-github-event'] = 'push';
+            const result = scm.parseHook(testPayloadPush, testHeaders);
+
+            assert.deepEqual(result, {
+                action: 'repo:push',
+                branch: 'master',
+                url: 'git@github.com:baxterthehacker/public-repo.git',
+                sha: '0d1a26e67d8f5eaf1f6ba5c57fc3c7d91ac0fd1c',
+                type: 'push',
+                username: 'baxterthehacker'
+            });
+        });
+
+        it('parses a payload for a pull request event payload', () => {
+            testHeaders['x-github-event'] = 'pull_request';
+
+            const result = scm.parseHook(testPayloadOpen, testHeaders);
+
+            payloadChecker(result);
+            assert.calledWith(payloadChecker, sinon.match(commonPullRequestParse));
+            assert.calledWith(payloadChecker, sinon.match({ action: 'pr:opened' }));
+        });
+
+        it('parses a payload for a pull request being closed', () => {
+            testHeaders['x-github-event'] = 'pull_request';
+
+            const result = scm.parseHook(testPayloadClose, testHeaders);
+
+            payloadChecker(result);
+            assert.calledWith(payloadChecker, sinon.match(commonPullRequestParse));
+            assert.calledWith(payloadChecker, sinon.match({ action: 'pr:closed' }));
+
+            assert.propertyVal(result, 'action', 'pr:closed');
+        });
+
+        it('parses a payload for a pull request being synchronized', () => {
+            testHeaders['x-github-event'] = 'pull_request';
+
+            const result = scm.parseHook(testPayloadSync, testHeaders);
+
+            payloadChecker(result);
+            assert.calledWith(payloadChecker, sinon.match(commonPullRequestParse));
+            assert.calledWith(payloadChecker, sinon.match({ action: 'pr:synchronize' }));
+        });
+
+        it('treats a payload for a pull request event that is unsupported as closed', () => {
+            testHeaders['x-github-event'] = 'pull_request';
+
+            const result = scm.parseHook(testPayloadOther, testHeaders);
+
+            payloadChecker(result);
+            assert.calledWith(payloadChecker, sinon.match(commonPullRequestParse));
+            assert.calledWith(payloadChecker, sinon.match({ action: 'pr:closed' }));
+        });
+
+        it('throws an error when parsing an unsupported payload', () => {
+            testHeaders['x-github-event'] = 'other_event';
+
+            const functionToAssert = scm.parseHook.bind(scm, testPayloadPush, testHeaders);
+
+            assert.throws(functionToAssert, /Event other_event not supported/);
         });
     });
 });

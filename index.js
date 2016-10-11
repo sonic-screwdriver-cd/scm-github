@@ -1,6 +1,7 @@
 'use strict';
 const Breaker = require('circuit-fuses');
 const Github = require('github');
+const hoek = require('hoek');
 const schema = require('screwdriver-data-schema');
 const Scm = require('screwdriver-scm-base');
 const MATCH_COMPONENT_BRANCH_NAME = 4;
@@ -19,6 +20,11 @@ const DESCRIPTION_MAP = {
     RUNNING: 'Testing your code...',
     QUEUED: 'Looking for a place to park...'
 };
+const SUPPORTED_PR_ACTIONS = [
+    'closed',
+    'opened',
+    'synchronize'
+];
 
 /**
 * Get repo information
@@ -324,6 +330,55 @@ class GithubScm extends Scm {
             name: repoInfo.full_name,
             url: branchUrl
         }));
+    }
+
+    /**
+     * Given a SCM webhook payload & its associated headers, aggregate the
+     * necessary data to execute a Screwdriver job with.
+     * @method parseHook
+     * @param  {Object}  webhookPayload  The webhook payload received from the
+     *                                   SCM service.
+     * @param  {Object}  payloadHeaders  The request headers associated with the
+     *                                   webhook payload
+     * @return {Object}                  A key-map of data related to the received
+     *                                   payload
+     */
+    parseHook(webhookPayload, payloadHeaders) {
+        const type = payloadHeaders['x-github-event'];
+        const url = hoek.reach(webhookPayload, 'repository.ssh_url');
+
+        switch (type) {
+        case 'pull_request': {
+            let action = hoek.reach(webhookPayload, 'action');
+            const prNumber = hoek.reach(webhookPayload, 'pull_request.number');
+
+            if (!SUPPORTED_PR_ACTIONS.includes(action)) {
+                action = 'closed';
+            }
+
+            return {
+                action: `pr:${action}`,
+                branch: hoek.reach(webhookPayload, 'pull_request.base.ref'),
+                url,
+                prNumber,
+                prRef: `${url}#pull/${prNumber}/merge`,
+                sha: hoek.reach(webhookPayload, 'pull_request.head.sha'),
+                type,
+                username: hoek.reach(webhookPayload, 'pull_request.user.login')
+            };
+        }
+        case 'push':
+            return {
+                action: 'repo:push',
+                branch: hoek.reach(webhookPayload, 'ref').replace(/^refs\/heads\//, ''),
+                url: hoek.reach(webhookPayload, 'repository.ssh_url'),
+                sha: hoek.reach(webhookPayload, 'after'),
+                type,
+                username: hoek.reach(webhookPayload, 'sender.login')
+            };
+        default:
+            throw new Error(`Event ${type} not supported`);
+        }
     }
 }
 
