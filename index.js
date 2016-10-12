@@ -67,10 +67,11 @@ class GithubScm extends Scm {
     /**
     * Github command to run
     * @method _githubCommand
-    * @param  {Object}   options            An object that tells what command & params to run
-    * @param  {String}   options.action     Github method. For example: get
-    * @param  {String}   options.token      Github token used for authentication of requests
-    * @param  {Object}   options.params     Parameters to run with
+    * @param  {Object}   options              An object that tells what command & params to run
+    * @param  {String}   options.action       Github method. For example: get
+    * @param  {String}   options.token        Github token used for authentication of requests
+    * @param  {Object}   options.params       Parameters to run with
+    * @param  {String}   [options.scopeType]  Type of request to make. Default is 'repos'
     * @param  {Function} callback           Callback function from github API
     */
     _githubCommand(options, callback) {
@@ -78,8 +79,9 @@ class GithubScm extends Scm {
             type: 'oauth',
             token: options.token
         });
+        const scopeType = options.scopeType || 'repos';
 
-        this.github.repos[options.action](options.params, callback);
+        this.github[scopeType][options.action](options.params, callback);
     }
 
     /**
@@ -352,21 +354,103 @@ class GithubScm extends Scm {
     }
 
     /**
+     * Decorate the author for the specific source control
+     * @method _decorateAuthor
+     * @param  {Object}        config []
+     * @param  {Object}        config.scmUri []
+     * @param  {Object}        config.token []
+     * @param  {Object}        config.username []
+     * @return {[type]}               [description]
+     */
+    _decorateAuthor(config) {
+        return new Promise((resolve, reject) => {
+            this.breaker.runCommand({
+                action: 'getForUser',
+                scopeType: 'users',
+                token: config.token,
+                params: { user: config.username }
+            }, (error, data) => {
+                if (error) {
+                    return reject(error);
+                }
+
+                return resolve({
+                    avatar: data.avatar_url,
+                    name: data.name,
+                    username: data.login,
+                    url: data.html_url
+                });
+            });
+        });
+    }
+
+    /**
+     * Decorate the commit for the specific source control
+     * @method _decorateCommit
+     * @param  {Object}        config [description]
+     * @param  {Object}        config.scmUri [description]
+     * @param  {Object}        config.token [description]
+     * @return {[type]}               [description]
+     */
+    _decorateCommit(config) {
+        // https://github.com/screwdriver-cd/data-schema/tree/9f8539fa15c2b02c90b52d9bb7af427c62851174
+
+        return this.lookupScmUri({
+            scmUri: config.scmUri,
+            token: config.token
+        }).then((scmInfo) => {
+            return new Promise((resolve, reject) => {
+                this.breaker.runCommand({
+                    action: 'getCommit',
+                    token: config.token,
+                    params: {
+                        owner: scmInfo.user,
+                        repo: scmInfo.repo,
+                        sha: config.sha
+                    }
+                }, (error, data) => {
+                    if (error) {
+                        return reject(error);
+                    }
+
+                    const commitInfo = data.commit;
+
+                    return resolve({
+                        author: {
+                            avatar: data.author.avatar_url,
+                            name: commitInfo.author.name,
+                            url: data.author.html_url,
+                            username: data.author.login
+                        },
+                        message: commitInfo.message,
+                        url: `https://github.com/${scmInfo.user}/${scmInfo.repo}/tree/${config.sha}`
+                    });
+                });
+            });
+        });
+    }
+
+    /**
      * Decorate a given SCM URL with additional data to better display
      * related information. If a branch suffix is not provided, it will default
      * to the master branch
      * @method decorateUrl
-     * @param  {String}    scmUrl The scm url, of the form git@github.com:owner/repo.git
+     * @param  {Config}    config        The scm url, of the form git@github.com:owner/repo.git
+     * @param  {String}    config.scmUri The scm url, of the form git@github.com:owner/repo.git
+     * @param  {String}    config.token  The scm url, of the form git@github.com:owner/repo.git
      * @return {Object}
      */
-    decorateUrl(scmUrl) {
-        const scmInfo = getInfo(scmUrl);
-
-        return {
-            subtitle: scmInfo.branch,
-            title: `${scmInfo.user}:${scmInfo.repo}`,
-            url: `https://${scmInfo.host}/${scmInfo.user}/${scmInfo.repo}/tree/${scmInfo.branch}`
-        };
+    _decorateUrl(config) {
+        return this.lookupScmUri({
+            scmUri: config.scmUri,
+            token: config.token
+        }).then((scmInfo) => {
+            return {
+                branch: scmInfo.branch,
+                name: `${scmInfo.user}/${scmInfo.repo}`,
+                url: `https://${scmInfo.host}/${scmInfo.user}/${scmInfo.repo}/tree/${scmInfo.branch}`
+            };
+        });
     }
 
     /**

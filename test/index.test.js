@@ -31,7 +31,11 @@ describe('index', () => {
                 get: sinon.stub(),
                 getBranch: sinon.stub(),
                 getById: sinon.stub(),
+                getCommit: sinon.stub(),
                 getContent: sinon.stub()
+            },
+            users: {
+                getForUser: sinon.stub()
             }
         };
 
@@ -594,7 +598,7 @@ jobs:
         });
     });
 
-    describe.only('parseHook', () => {
+    describe('parseHook', () => {
         const commonPullRequestParse = {
             branch: 'master',
             checkoutUrl: 'git@github.com:baxterthehacker/public-repo.git',
@@ -723,15 +727,174 @@ jobs:
         });
     });
 
-    describe('decorateUrl', () => {
-        it('decorates a complete ssh url', () => {
-            const scmUrl = 'git@github.com:iAm/theCaptain.git#boat';
-            const result = scm.decorateUrl(scmUrl);
+    describe('decorateAuthor', () => {
+        const scmUri = 'github.com:9876:master';
+        const username = 'notmrkent';
 
-            assert.deepEqual(result, {
-                subtitle: 'boat',
-                title: 'iAm:theCaptain',
-                url: 'https://github.com/iAm/theCaptain/tree/boat'
+        it('decorates a github user', () => {
+            githubMock.users.getForUser.yieldsAsync(null, {
+                login: username,
+                id: 2042,
+                avatar_url: 'https://avatars.githubusercontent.com/u/2042?v=3',
+                html_url: `https://github.com/${username}`,
+                name: 'Klark Cent'
+            });
+
+            return scm.decorateAuthor({
+                scmUri,
+                token: 'tokenfordecorateauthor',
+                username
+            }).then((data) => {
+                assert.deepEqual(data, {
+                    avatar: 'https://avatars.githubusercontent.com/u/2042?v=3',
+                    name: 'Klark Cent',
+                    url: `https://github.com/${username}`,
+                    username
+                });
+
+                assert.calledWith(githubMock.users.getForUser, {
+                    user: username
+                });
+            });
+        });
+
+        it('rejects when failing to communicate with github', () => {
+            const testError = new Error('someGithubCommError');
+
+            githubMock.users.getForUser.yieldsAsync(testError);
+
+            return scm.decorateAuthor({
+                scmUri,
+                token: 'randomtoken',
+                username
+            }).then(() => {
+                assert.fail('This should not fail the test');
+            }, (err) => {
+                assert.deepEqual(err, testError);
+
+                assert.calledWith(githubMock.users.getForUser, {
+                    user: username
+                });
+            });
+        });
+    });
+
+    describe('decorateCommit', () => {
+        const scmUri = 'github.com:089253:yummy';
+        const sha = '26516f13718705497086a00929eedf45eb729fe6';
+
+        beforeEach(() => {
+            githubMock.repos.getById.yieldsAsync(null, {
+                full_name: 'banana/peel'
+            });
+        });
+
+        it('decorates a commit', () => {
+            githubMock.repos.getCommit.yieldsAsync(null, {
+                commit: {
+                    author: {
+                        name: 'Batman Wayne'
+                    },
+                    message: 'some commit message that is here'
+                },
+                author: {
+                    login: 'notbrucewayne',
+                    id: 1234567,
+                    avatar_url: 'https://avatars.githubusercontent.com/u/1234567?v=3',
+                    html_url: 'https://github.com/notbrucewayne',
+                    type: 'User',
+                    site_admin: false
+                }
+            });
+
+            return scm.decorateCommit({
+                scmUri,
+                sha,
+                token: 'tokenfordecoratecommit'
+            }).then((data) => {
+                assert.deepEqual(data, {
+                    author: {
+                        avatar: 'https://avatars.githubusercontent.com/u/1234567?v=3',
+                        name: 'Batman Wayne',
+                        url: 'https://github.com/notbrucewayne',
+                        username: 'notbrucewayne'
+                    },
+                    message: 'some commit message that is here',
+                    url: `https://github.com/banana/peel/tree/${sha}`
+                });
+
+                assert.calledWith(githubMock.repos.getCommit, {
+                    owner: 'banana',
+                    repo: 'peel',
+                    sha
+                });
+            });
+        });
+
+        it('rejects when failing to communicate with github', () => {
+            const testError = new Error('theErrIexpect');
+
+            githubMock.repos.getCommit.yieldsAsync(testError);
+
+            return scm.decorateCommit({
+                scmUri,
+                sha,
+                token: 'tokenforfailingtodecorate'
+            }).then(() => {
+                assert.fail('This should not fail the test');
+            }, (err) => {
+                assert.deepEqual(err, testError);
+
+                assert.calledWith(githubMock.repos.getCommit, {
+                    owner: 'banana',
+                    repo: 'peel',
+                    sha
+                });
+            });
+        });
+    });
+
+    describe('decorateUrl', () => {
+        it('decorates a scm uri', () => {
+            const scmUri = 'github.com:102498:boat';
+
+            githubMock.repos.getById.yieldsAsync(null, {
+                full_name: 'iAm/theCaptain'
+            });
+
+            return scm.decorateUrl({
+                scmUri,
+                token: 'mytokenfortesting'
+            }).then((data) => {
+                assert.deepEqual(data, {
+                    branch: 'boat',
+                    name: 'iAm/theCaptain',
+                    url: 'https://github.com/iAm/theCaptain/tree/boat'
+                });
+
+                assert.calledWith(githubMock.repos.getById, {
+                    id: '102498'
+                });
+            });
+        });
+
+        it('rejects when github lookup fails', () => {
+            const scmUri = 'github.com:102498:boat';
+            const testError = new Error('decorateUrlError');
+
+            githubMock.repos.getById.yieldsAsync(testError);
+
+            return scm.decorateUrl({
+                scmUri,
+                token: 'mytokenfortesting'
+            }).then(() => {
+                assert.fail('This should not fail the test');
+            }, (err) => {
+                assert.deepEqual(err, testError);
+
+                assert.calledWith(githubMock.repos.getById, {
+                    id: '102498'
+                });
             });
         });
     });
