@@ -50,19 +50,6 @@ function getInfo(scmUrl) {
     };
 }
 
-function parseUri(scmUri) {
-    const parts = scmUri.split(':');
-    const host = parts[0];
-    const id = parts[1];
-    const branch = parts[2];
-
-    return {
-        branch,
-        host,
-        id
-    };
-}
-
 class GithubScm extends Scm {
     /**
     * Github command to run
@@ -398,8 +385,8 @@ class GithubScm extends Scm {
         return this.lookupScmUri({
             scmUri: config.scmUri,
             token: config.token
-        }).then((scmInfo) => {
-            return new Promise((resolve, reject) => {
+        }).then((scmInfo) =>
+            new Promise((resolve, reject) => {
                 this.breaker.runCommand({
                     action: 'getCommit',
                     token: config.token,
@@ -426,8 +413,8 @@ class GithubScm extends Scm {
                         url: `https://github.com/${scmInfo.user}/${scmInfo.repo}/tree/${config.sha}`
                     });
                 });
-            });
-        });
+            })
+        );
     }
 
     /**
@@ -445,10 +432,12 @@ class GithubScm extends Scm {
             scmUri: config.scmUri,
             token: config.token
         }).then((scmInfo) => {
+            const baseUrl = `${scmInfo.host}/${scmInfo.user}/${scmInfo.repo}`;
+
             return {
                 branch: scmInfo.branch,
                 name: `${scmInfo.user}/${scmInfo.repo}`,
-                url: `https://${scmInfo.host}/${scmInfo.user}/${scmInfo.repo}/tree/${scmInfo.branch}`
+                url: `https://${baseUrl}/tree/${scmInfo.branch}`
             };
         });
     }
