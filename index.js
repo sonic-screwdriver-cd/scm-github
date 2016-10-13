@@ -9,6 +9,10 @@ const MATCH_COMPONENT_BRANCH_NAME = 4;
 const MATCH_COMPONENT_REPO_NAME = 3;
 const MATCH_COMPONENT_USER_NAME = 2;
 const MATCH_COMPONENT_HOST_NAME = 1;
+const PART_OWNER_NAME = 0;
+const PART_REPO_NAME = 1;
+const PART_SCM_URI_BRANCH = 2;
+const PART_SCM_URI_HOST = 0;
 const STATE_MAP = {
     SUCCESS: 'success',
     RUNNING: 'pending',
@@ -54,6 +58,7 @@ class GithubScm extends Scm {
     * @param  {String}   options.action     Github method. For example: get
     * @param  {String}   options.token      Github token used for authentication of requests
     * @param  {Object}   options.params     Parameters to run with
+    * @param  {String}   [options.scopeType]  Type of request to make. Default is 'repos'
     * @param  {Function} callback           Callback function from github API
     */
     _githubCommand(options, callback) {
@@ -61,8 +66,9 @@ class GithubScm extends Scm {
             type: 'oauth',
             token: options.token
         });
+        const scopeType = options.scopeType || 'repos';
 
-        this.github.repos[options.action](options.params, callback);
+        this.github[scopeType][options.action](options.params, callback);
     }
 
     /**
@@ -85,6 +91,41 @@ class GithubScm extends Scm {
             breaker: config.breaker
         });
     }
+
+    /**
+     * Look up a repo by SCM URI
+     * @method lookupScmUri
+     * @param  {Object}     config Config object
+     * @param  {Object}     config.scmUri The SCM URI to look up relevant info
+     * @param  {Object}     config.token  Service token to authenticate with Github
+     * @return {Promise}                  Resolves to an object containing
+     *                                    repository-related information
+     */
+    lookupScmUri(config) {
+        const scmUriParts = config.scmUri.split(':');
+
+        return new Promise((resolve, reject) => {
+            this.breaker.runCommand({
+                action: 'getById',
+                token: config.token,
+                params: { id: scmUriParts[1] }  // magic number
+            }, (error, data) => {
+                if (error) {
+                    return reject(error);
+                }
+
+                const repoNameParts = data.full_name.split('/');
+
+                return resolve({
+                    branch: scmUriParts[PART_SCM_URI_BRANCH],
+                    host: scmUriParts[PART_SCM_URI_HOST],
+                    repo: repoNameParts[PART_REPO_NAME],
+                    user: repoNameParts[PART_OWNER_NAME]
+                });
+            });
+        });
+    }
+
     /**
     * Format the scmUrl for the specific source control
     * @method formatScmUrl
@@ -98,6 +139,105 @@ class GithubScm extends Scm {
         result = result.split('#')[0].toLowerCase().concat(`#${branchName}`);
 
         return result;
+    }
+
+    /**
+     * Decorate the author based on the Github service
+     * @method _decorateAuthor
+     * @param  {Object}        config          Configuration object
+     * @param  {Object}        config.token    Service token to authenticate with Github
+     * @param  {Object}        config.username Username to query more information for
+     * @return {Promise}
+     */
+    _decorateAuthor(config) {
+        return new Promise((resolve, reject) => {
+            this.breaker.runCommand({
+                action: 'getForUser',
+                scopeType: 'users',
+                token: config.token,
+                params: { user: config.username }
+            }, (error, data) => {
+                if (error) {
+                    return reject(error);
+                }
+
+                return resolve({
+                    avatar: data.avatar_url,
+                    name: data.name,
+                    username: data.login,
+                    url: data.html_url
+                });
+            });
+        });
+    }
+
+    /**
+     * Decorate the commit based on the repository
+     * @method _decorateCommit
+     * @param  {Object}        config        Configuration object
+     * @param  {Object}        config.scmUri SCM URI the commit belongs to
+     * @param  {Object}        config.token  Service token to authenticate with Github
+     * @return {[type]}               [description]
+     */
+    _decorateCommit(config) {
+        return this.lookupScmUri({
+            scmUri: config.scmUri,
+            token: config.token
+        }).then(scmInfo =>
+            new Promise((resolve, reject) => {
+                this.breaker.runCommand({
+                    action: 'getCommit',
+                    token: config.token,
+                    params: {
+                        owner: scmInfo.user,
+                        repo: scmInfo.repo,
+                        sha: config.sha
+                    }
+                }, (error, data) => {
+                    if (error) {
+                        return reject(error);
+                    }
+
+                    const commitInfo = data.commit;
+
+                    return resolve({
+                        author: {
+                            avatar: data.author.avatar_url,
+                            name: commitInfo.author.name,
+                            url: data.author.html_url,
+                            username: data.author.login
+                        },
+                        message: commitInfo.message,
+                        url: `https://github.com/${scmInfo.user}/${scmInfo.repo}/tree/${config.sha}`
+                    });
+                });
+            })
+        );
+    }
+
+    /**
+     * Decorate a given SCM URL with additional data to better display
+     * related information. If a branch suffix is not provided, it will default
+     * to the master branch
+     * @method decorateUrl
+     * @param  {Config}    config        Configuration object
+     * @param  {String}    config.scmUri The scm uri, of the form git@github.com:owner/repo.git
+     * @param  {String}    config.token  The scm url, of the form git@github.com:owner/repo.git
+     * @return {Object}
+     */
+    _decorateUrl(config) {
+        return this.lookupScmUri({
+            scmUri: config.scmUri,
+            token: config.token
+        }).then((scmInfo) => {
+            const baseUrl = `${scmInfo.host}/${scmInfo.user}/${scmInfo.repo}`;
+
+            return {
+                branch: scmInfo.branch,
+                name: `${scmInfo.user}/${scmInfo.repo}`,
+                url: `https://${baseUrl}/tree/${scmInfo.branch}`
+            };
+        });
     }
 
     /**
