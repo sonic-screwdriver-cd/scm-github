@@ -39,7 +39,7 @@ function getInfo(scmUrl) {
     const branch = matched[MATCH_COMPONENT_BRANCH_NAME] || '#master';
 
     return {
-        user: matched[MATCH_COMPONENT_USER_NAME],
+        owner: matched[MATCH_COMPONENT_USER_NAME],
         repo: matched[MATCH_COMPONENT_REPO_NAME],
         host: matched[MATCH_COMPONENT_HOST_NAME],
         branch: branch.slice(1)
@@ -70,9 +70,9 @@ class GithubScm extends Scm {
     /**
     * Constructor
     * @method constructor
-    * @param  {Object} options           Configuration options
-    * @param  {Object} options.retry     Configuration options for circuit breaker retries
-    * @param  {Object} options.breaker   Configuration options for circuit breaker
+    * @param  {Object} config           Configuration config
+    * @param  {Object} config.retry     Configuration config for circuit breaker retries
+    * @param  {Object} config.breaker   Configuration config for circuit breaker
     * @return {GithubScm}
     */
     constructor(config) {
@@ -118,7 +118,7 @@ class GithubScm extends Scm {
                     branch: scmBranch,
                     host: scmHost,
                     repo: repoName,
-                    user: repoOwner
+                    owner: repoOwner
                 });
             });
         });
@@ -143,7 +143,7 @@ class GithubScm extends Scm {
                     token: config.token,
                     params: {
                         repo: scmInfo.repo,
-                        user: scmInfo.user
+                        owner: scmInfo.owner
                     }
                 }, (error, data) => {
                     if (error) {
@@ -177,7 +177,7 @@ class GithubScm extends Scm {
                         branch: scmInfo.branch,
                         host: scmInfo.host,
                         repo: scmInfo.repo,
-                        user: scmInfo.user
+                        owner: scmInfo.owner
                     }
                 }, (error, data) => {
                     if (error) {
@@ -214,7 +214,7 @@ class GithubScm extends Scm {
                 repo: scmInfo.repo,
                 sha: config.sha,
                 state: STATE_MAP[config.buildStatus] || 'failure',
-                user: scmInfo.user
+                owner: scmInfo.owner
             };
 
             if (config.url) {
@@ -257,7 +257,7 @@ class GithubScm extends Scm {
                     action: 'getContent',
                     token: config.token,
                     params: {
-                        user: scmInfo.user,
+                        owner: scmInfo.owner,
                         repo: scmInfo.repo,
                         path: config.path,
                         ref: config.ref || scmInfo.branch
@@ -337,7 +337,7 @@ class GithubScm extends Scm {
                 action: 'getForUser',
                 scopeType: 'users',
                 token: config.token,
-                params: { user: config.username }
+                params: { owner: config.username }
             }, (error, data) => {
                 if (error) {
                     return reject(error);
@@ -372,7 +372,7 @@ class GithubScm extends Scm {
                     action: 'getCommit',
                     token: config.token,
                     params: {
-                        user: scmInfo.user,
+                        owner: scmInfo.owner,
                         repo: scmInfo.repo,
                         sha: config.sha
                     }
@@ -419,11 +419,11 @@ class GithubScm extends Scm {
             scmUri: config.scmUri,
             token: config.token
         }).then((scmInfo) => {
-            const baseUrl = `${scmInfo.host}/${scmInfo.user}/${scmInfo.repo}`;
+            const baseUrl = `${scmInfo.host}/${scmInfo.owner}/${scmInfo.repo}`;
 
             return {
                 branch: scmInfo.branch,
-                name: `${scmInfo.user}/${scmInfo.repo}`,
+                name: `${scmInfo.owner}/${scmInfo.repo}`,
                 url: `https://${baseUrl}/tree/${scmInfo.branch}`
             };
         });

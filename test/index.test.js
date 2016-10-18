@@ -92,7 +92,7 @@ describe('index', () => {
                     assert.deepEqual(data, branch.commit.sha);
 
                     assert.calledWith(githubMock.repos.getBranch, {
-                        user: 'screwdriver-cd',
+                        owner: 'screwdriver-cd',
                         repo: 'models',
                         host: 'github.com',
                         branch: 'master'
@@ -144,7 +144,7 @@ describe('index', () => {
                 assert.deepEqual(err, error);
 
                 assert.calledWith(githubMock.repos.getBranch, {
-                    user: 'screwdriver-cd',
+                    owner: 'screwdriver-cd',
                     repo: 'models',
                     host: 'github.com',
                     branch: 'master'
@@ -194,7 +194,7 @@ describe('index', () => {
                     });
 
                     assert.calledWith(githubMock.repos.get, {
-                        user: 'screwdriver-cd',
+                        owner: 'screwdriver-cd',
                         repo: 'models'
                     });
 
@@ -247,7 +247,7 @@ describe('index', () => {
                     branch: 'targetBranch',
                     host: 'github.com',
                     repo: 'models',
-                    user: 'screwdriver-cd'
+                    owner: 'screwdriver-cd'
                 });
 
                 assert.calledWith(githubMock.repos.getById, {
@@ -318,7 +318,7 @@ describe('index', () => {
                     id: '14052'
                 });
                 assert.calledWith(githubMock.repos.createStatus, {
-                    user: 'screwdriver-cd',
+                    owner: 'screwdriver-cd',
                     repo: 'models',
                     sha: config.sha,
                     state: 'success',
@@ -343,7 +343,7 @@ describe('index', () => {
                         id: '14052'
                     });
                     assert.calledWith(githubMock.repos.createStatus, {
-                        user: 'screwdriver-cd',
+                        owner: 'screwdriver-cd',
                         repo: 'models',
                         sha: config.sha,
                         state: 'success',
@@ -366,7 +366,7 @@ describe('index', () => {
                     assert.deepEqual(result, data);
 
                     assert.calledWith(githubMock.repos.createStatus, {
-                        user: 'screwdriver-cd',
+                        owner: 'screwdriver-cd',
                         repo: 'models',
                         sha: config.sha,
                         state: 'success',
@@ -388,7 +388,7 @@ describe('index', () => {
                     assert.deepEqual(result, data);
 
                     assert.calledWith(githubMock.repos.createStatus, {
-                        user: 'screwdriver-cd',
+                        owner: 'screwdriver-cd',
                         repo: 'models',
                         sha: config.sha,
                         state: 'failure',
@@ -415,7 +415,7 @@ describe('index', () => {
                     assert.deepEqual(error, err);
 
                     assert.calledWith(githubMock.repos.createStatus, {
-                        user: 'screwdriver-cd',
+                        owner: 'screwdriver-cd',
                         repo: 'models',
                         sha: config.sha,
                         state: 'success',
@@ -522,7 +522,7 @@ jobs:
                     assert.deepEqual(data, expectedYaml);
 
                     assert.calledWith(githubMock.repos.getContent, {
-                        user: 'screwdriver-cd',
+                        owner: 'screwdriver-cd',
                         repo: 'models',
                         path: config.path,
                         ref: config.ref
@@ -542,7 +542,7 @@ jobs:
                     assert.deepEqual(data, expectedYaml);
 
                     assert.calledWith(githubMock.repos.getContent, {
-                        user: 'screwdriver-cd',
+                        owner: 'screwdriver-cd',
                         repo: 'models',
                         path: configNoRef.path,
                         ref: 'master'
@@ -567,7 +567,7 @@ jobs:
                     assert.strictEqual(err.message, expectedErrorMessage);
 
                     assert.calledWith(githubMock.repos.getContent, {
-                        user: 'screwdriver-cd',
+                        owner: 'screwdriver-cd',
                         repo: 'models',
                         path: config.path,
                         ref: config.ref
@@ -593,7 +593,7 @@ jobs:
             })
             .catch((error) => {
                 assert.calledWith(githubMock.repos.getContent, {
-                    user: 'screwdriver-cd',
+                    owner: 'screwdriver-cd',
                     repo: 'models',
                     path: config.path,
                     ref: config.ref
@@ -709,7 +709,7 @@ jobs:
         const repoInfo = {
             host: 'github.com',
             repo: 'theCaptain',
-            user: 'iAm'
+            owner: 'iAm'
         };
 
         beforeEach(() => {
@@ -809,7 +809,7 @@ jobs:
                 });
 
                 assert.calledWith(githubMock.users.getForUser, {
-                    user: username
+                    owner: username
                 });
             });
         });
@@ -828,7 +828,7 @@ jobs:
                 assert.deepEqual(err, testError);
 
                 assert.calledWith(githubMock.users.getForUser, {
-                    user: username
+                    owner: username
                 });
             });
         });
@@ -887,12 +887,12 @@ jobs:
                     id: scmId
                 });
                 assert.calledWith(githubMock.repos.getCommit, {
-                    user: repoOwner,
+                    owner: repoOwner,
                     repo: repoName,
                     sha
                 });
                 assert.calledWith(githubMock.users.getForUser, {
-                    user: username
+                    owner: username
                 });
             });
         });
@@ -912,7 +912,7 @@ jobs:
                 assert.deepEqual(err, testError);
 
                 assert.calledWith(githubMock.repos.getCommit, {
-                    user: 'banana',
+                    owner: 'banana',
                     repo: 'peel',
                     sha
                 });
