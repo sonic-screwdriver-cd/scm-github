@@ -844,6 +844,7 @@ class GithubScm extends Scm {
 
         // eslint-disable-next-line no-underscore-dangle
         if (!this._checkSignature(this.config.secret, webhookPayload, signature)) {
+            winston.err('Invalid x-hub-signature: ', signature);
             throw new Error('Invalid x-hub-signature');
         }
 
