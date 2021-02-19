@@ -52,6 +52,30 @@ const DEPLOY_KEY_GENERATOR_CONFIG = {
 };
 
 /**
+ * Check the status code of the server's response.
+ *
+ * If there was an error encountered with the request, this will format a human-readable
+ * error message.
+ * @method checkResponseError
+ * @param  {HTTPResponse}   response                               HTTP Response from `request` call
+ * @param  {Number}         response.statusCode                    HTTP status code of the HTTP request
+ * @param  {String}         [response.body.error.message]          Error message from the server
+ * @param  {String}         [response.body.error.detail.required]  Error resolution message
+ * @return {Promise}                                               Resolves when no error encountered.
+ *                                                                 Rejects when status code is non-200
+ */
+function checkResponseError(err, caller) {
+    if (!err.status || !err.message) {
+        throw err;
+    }
+
+    const error = new Error(`${err.status} Reason "${err.message}" Caller "${caller}"`);
+
+    error.code = err.status;
+    throw error;
+}
+
+/**
  * Get repo information
  * @method getInfo
  * @param  {String}  scmUrl      scmUrl of the repo
@@ -187,7 +211,7 @@ class GithubScm extends Scm {
                 defaultBranch = repo.data.default_branch;
             } catch (err) {
                 logger.error('Failed to lookupScmUri: ', err);
-                throw err;
+                checkResponseError(err, 'lookupScmUri');
             }
         }
 
@@ -244,7 +268,7 @@ class GithubScm extends Scm {
             await this.promiseToWait(POLLING_INTERVAL);
         } catch (err) {
             logger.error('Failed to getPrInfo: ', err);
-            throw err;
+            checkResponseError(err, 'waitPrMergeability');
         }
 
         return this.waitPrMergeability({ scmUri, token, prNum }, count + 1);
@@ -276,7 +300,6 @@ class GithubScm extends Scm {
             };
         } catch (err) {
             logger.error('Failed to fetch PR comments: ', err);
-
             return null;
         }
     }
@@ -370,7 +393,7 @@ class GithubScm extends Scm {
             return key;
         } catch (err) {
             logger.error('Failed to add token: ', err);
-            throw err;
+            checkResponseError(err, '_addDeployKey');
         }
     }
 
@@ -424,7 +447,7 @@ class GithubScm extends Scm {
             return screwdriverHook;
         } catch (err) {
             logger.error('Failed to findWebhook: ', err);
-            throw err;
+            checkResponseError(err, '_findWebhook');
         }
     }
 
@@ -470,7 +493,7 @@ class GithubScm extends Scm {
             return hooks.data;
         } catch (err) {
             logger.error('Failed to createWebhook: ', err);
-            throw err;
+            checkResponseError(err, '_createWebhook');
         }
     }
 
@@ -750,7 +773,7 @@ class GithubScm extends Scm {
             }));
         } catch (err) {
             logger.error('Failed to getOpenedPRs: ', err);
-            throw err;
+            checkResponseError(err, '_getOpenedPRs');
         }
     }
 
@@ -797,7 +820,7 @@ class GithubScm extends Scm {
             }
 
             logger.error('Failed to getPermissions: ', err);
-            throw err;
+            checkResponseError(err, '_getPermissions');
         }
     }
 
@@ -838,7 +861,7 @@ class GithubScm extends Scm {
             return result;
         } catch (err) {
             logger.error('Failed to getOrgPermissions: ', err);
-            throw err;
+            checkResponseError(err, '_getOrgPermissions');
         }
     }
 
@@ -884,7 +907,7 @@ class GithubScm extends Scm {
             return branch.data.commit.sha;
         } catch (err) {
             logger.error('Failed to getCommitSha: ', err);
-            throw err;
+            checkResponseError(err, '_getCommitSha');
         }
     }
 
@@ -933,7 +956,7 @@ class GithubScm extends Scm {
             throw new Error(`Cannot handle ${refObj.data.object.type} type`);
         } catch (err) {
             logger.error('Failed to getCommitRefSha: ', err);
-            throw err;
+            checkResponseError(err, '_getCommitRefSha');
         }
     }
 
@@ -981,7 +1004,7 @@ class GithubScm extends Scm {
         } catch (err) {
             if (err.status !== 422) {
                 logger.error('Failed to updateCommitStatus: ', err);
-                throw err;
+                checkResponseError(err, '_updateCommitStatus');
             }
 
             return undefined;
@@ -1037,7 +1060,7 @@ class GithubScm extends Scm {
                 return '';
             }
 
-            throw err;
+            checkResponseError(err, '_getFile');
         }
     }
 
@@ -1079,7 +1102,7 @@ class GithubScm extends Scm {
             }
 
             logger.error('Failed to getRepoId: ', err);
-            throw new Error(err);
+            checkResponseError(err, '_getRepoInfo');
         }
     }
 
@@ -1109,7 +1132,7 @@ class GithubScm extends Scm {
             };
         } catch (err) {
             logger.error('Failed to decorateAuthor: ', err);
-            throw err;
+            checkResponseError(err, '_decorateAuthor');
         }
     }
 
@@ -1176,7 +1199,7 @@ class GithubScm extends Scm {
             };
         } catch (err) {
             logger.error('Failed to decorateCommit: ', err);
-            throw err;
+            checkResponseError(err, '_decorateCommit');
         }
     }
 
@@ -1532,7 +1555,7 @@ class GithubScm extends Scm {
             };
         } catch (err) {
             logger.error('Failed to getPrInfo: ', err);
-            throw err;
+            checkResponseError(err, '_getPrInfo');
         }
     }
 
@@ -1667,7 +1690,7 @@ class GithubScm extends Scm {
             return branches.map(branch => ({ name: hoek.reach(branch, 'name') }));
         } catch (err) {
             logger.error('Failed to findBranches: ', err);
-            throw err;
+            checkResponseError(err, '_findBranches');
         }
     }
 
@@ -1691,7 +1714,7 @@ class GithubScm extends Scm {
             token: config.token
         }).catch((err) => {
             logger.error('Failed to getBranchList: ', err);
-            throw err;
+            checkResponseError(err, '_getBranchList');
         });
     }
 
@@ -1763,7 +1786,7 @@ class GithubScm extends Scm {
             }))
             .catch((err) => {
                 logger.error('Failed to openPr: ', err);
-                throw err;
+                checkResponseError(err, '_openPr');
             });
     }
 }
