@@ -210,10 +210,13 @@ function escapeDollarForDoubleQuoteEnclosure(command) {
  * @param {String} errorReason Error message
  * @throws {Error}             Throws error
  */
-function throwError(errorReason, errorCode = 500) {
+function throwError(errorReason, errorCode, reasonCode) {
     const err = new Error(errorReason);
 
-    err.statusCode = errorCode;
+    err.statusCode = errorCode || 500;
+    if (reasonCode) {
+        err.reasonCode = reasonCode;
+    }
     throw err;
 }
 
@@ -299,6 +302,56 @@ function sanitizeError(err) {
     }
 
     return redact(err);
+}
+
+/**
+ * Sanitize an untrusted webhook value before including it in structured logs.
+ * @param  {*}      value     Candidate value
+ * @param  {Number} maxLength Maximum output length
+ * @returns {String|undefined} Sanitized value
+ */
+function sanitizeWebhookLogValue(value, maxLength = 256) {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+
+    return (
+        Array.from(value)
+            .filter(char => {
+                const codePoint = char.codePointAt(0);
+
+                return codePoint > 0x1f && codePoint !== 0x7f;
+            })
+            .join('')
+            .slice(0, maxLength) || undefined
+    );
+}
+
+/**
+ * Build a safe correlation context without logging the payload or signature.
+ * Repository and action are unverified because this runs before parseHook succeeds.
+ * @param  {Object} headers    Webhook request headers
+ * @param  {String} payload    Raw webhook payload
+ * @param  {String} scmContext SCM context being evaluated
+ * @returns {Object} Safe structured log context
+ */
+function getWebhookLogContext(headers, payload, scmContext) {
+    const context = {
+        scmContext,
+        deliveryId: sanitizeWebhookLogValue(headers['x-github-delivery'], 128),
+        event: sanitizeWebhookLogValue(headers['x-github-event'], 128)
+    };
+
+    try {
+        const parsedPayload = JSON.parse(payload);
+
+        context.action = sanitizeWebhookLogValue(parsedPayload.action, 128);
+        context.unverifiedRepository = sanitizeWebhookLogValue(hoek.reach(parsedPayload, 'repository.full_name'));
+    } catch (err) {
+        // Invalid JSON is classified by parseHook. Never include the raw payload here.
+    }
+
+    return context;
 }
 
 /**
@@ -2016,19 +2069,29 @@ class GithubScm extends Scm {
         const checkoutSshHost = this.config.gheHost ? this.config.gheHost : 'github.com';
 
         if (!signature) {
-            throwError('Missing webhook signature', 400);
+            throwError('Missing webhook signature', 400, 'MISSING_SIGNATURE');
         }
 
         // eslint-disable-next-line no-underscore-dangle
         if (!(await verify(this.config.secret, webhookPayload, signature))) {
-            throwError('Invalid webhook signature', 400);
+            throwError('Invalid webhook signature', 400, 'INVALID_SIGNATURE');
         }
 
-        const parsedWebhookPayload = JSON.parse(webhookPayload);
+        let parsedWebhookPayload;
+
+        try {
+            parsedWebhookPayload = JSON.parse(webhookPayload);
+        } catch (err) {
+            throwError('Invalid webhook JSON', 400, 'INVALID_JSON');
+        }
         const { error: baseHookError } = BASE_HOOK_SCHEMA.validate(parsedWebhookPayload);
 
         if (baseHookError) {
-            throwError(`Invalid webhook payload for event type "${type}": ${baseHookError.message}`, 400);
+            throwError(
+                `Invalid webhook payload for event type "${type}": ${baseHookError.message}`,
+                400,
+                'INVALID_PAYLOAD'
+            );
         }
 
         const checkoutUrl = hoek.reach(parsedWebhookPayload, 'repository.ssh_url');
@@ -2037,7 +2100,7 @@ class GithubScm extends Scm {
         const regexMatchArray = checkoutUrl.match(CHECKOUT_URL_REGEX);
 
         if (!regexMatchArray || regexMatchArray[1] !== checkoutSshHost) {
-            throwError(`Incorrect checkout SshHost: ${checkoutUrl}`, 400);
+            throwError(`Incorrect checkout SshHost: ${checkoutUrl}`, 400, 'SCM_CONTEXT_MISMATCH');
         }
 
         // additional check for github enterprise cloud hooks
@@ -2045,7 +2108,11 @@ class GithubScm extends Scm {
             const enterpriseSlug = hoek.reach(parsedWebhookPayload, 'enterprise.slug');
 
             if (this.config.gheCloudSlug !== enterpriseSlug) {
-                throwError(`Skipping incorrect scm context for hook parsing, ${checkoutUrl}, ${scmContext}`, 400);
+                throwError(
+                    `Skipping incorrect scm context for hook parsing, ${checkoutUrl}, ${scmContext}`,
+                    400,
+                    'SCM_CONTEXT_MISMATCH'
+                );
             }
         }
 
@@ -2055,7 +2122,11 @@ class GithubScm extends Scm {
             const { error: hookError } = hookEventSchema.validate(parsedWebhookPayload);
 
             if (hookError) {
-                throwError(`Invalid webhook payload for event type "${type}": ${hookError.message}`, 400);
+                throwError(
+                    `Invalid webhook payload for event type "${type}": ${hookError.message}`,
+                    400,
+                    'INVALID_PAYLOAD'
+                );
             }
         }
 
@@ -2436,7 +2507,11 @@ class GithubScm extends Scm {
 
             return true;
         } catch (err) {
-            logger.error('Failed to run canHandleWebhook', sanitizeError(err));
+            logger.error('Failed to run canHandleWebhook', {
+                reasonCode: err.reasonCode || 'WEBHOOK_PROCESSING_ERROR',
+                ...getWebhookLogContext(headers, payload, this._getScmContexts()[0]),
+                error: sanitizeError(err)
+            });
 
             return false;
         }

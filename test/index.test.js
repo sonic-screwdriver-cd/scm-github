@@ -2467,6 +2467,7 @@ jobs:
                 .catch(err => {
                     assert.include(err.message, 'Incorrect checkout SshHost');
                     assert.strictEqual(err.statusCode, 400);
+                    assert.strictEqual(err.reasonCode, 'SCM_CONTEXT_MISMATCH');
                 });
         });
 
@@ -2481,6 +2482,7 @@ jobs:
                 .catch(err => {
                     assert.equal(err.message, 'Invalid webhook signature');
                     assert.strictEqual(err.statusCode, 400);
+                    assert.strictEqual(err.reasonCode, 'INVALID_SIGNATURE');
                 });
         });
 
@@ -2526,7 +2528,26 @@ jobs:
                 .catch(err => {
                     assert.match(err.message, /Missing webhook signature/);
                     assert.strictEqual(err.statusCode, 400);
+                    assert.strictEqual(err.reasonCode, 'MISSING_SIGNATURE');
                 });
+        });
+
+        it('rejects invalid JSON with a reason code', () => {
+            const invalidPayload = '{';
+
+            testHeaders['x-hub-signature'] = `sha1=${crypto
+                .createHmac('sha1', 'somesecret')
+                .update(invalidPayload)
+                .digest('hex')}`;
+
+            return scm.parseHook(testHeaders, invalidPayload).then(
+                () => assert.fail('This should not pass the tests'),
+                err => {
+                    assert.strictEqual(err.message, 'Invalid webhook JSON');
+                    assert.strictEqual(err.statusCode, 400);
+                    assert.strictEqual(err.reasonCode, 'INVALID_JSON');
+                }
+            );
         });
 
         [
@@ -2563,6 +2584,7 @@ jobs:
                     .catch(err => {
                         assert.match(err.message, /Invalid webhook payload/);
                         assert.strictEqual(err.statusCode, 400);
+                        assert.strictEqual(err.reasonCode, 'INVALID_PAYLOAD');
                     });
             });
         });
@@ -4251,6 +4273,32 @@ jobs:
 
             return scm.canHandleWebhook(testHeaders, JSON.stringify(testPayloadPing)).then(result => {
                 assert.strictEqual(result, false);
+                assert.calledWithMatch(winstonMock.error, 'Failed to run canHandleWebhook', {
+                    reasonCode: 'INVALID_SIGNATURE',
+                    deliveryId: testHeaders['x-github-delivery'],
+                    event: 'pull_request',
+                    unverifiedRepository: testPayloadPing.repository.full_name,
+                    scmContext: 'github:github.com'
+                });
+            });
+        });
+
+        it('logs invalid JSON without including the raw payload', () => {
+            const invalidPayload = '{"repository":{"full_name":"org/repo"}';
+
+            testHeaders['x-hub-signature'] = `sha1=${crypto
+                .createHmac('sha1', 'somesecret')
+                .update(invalidPayload)
+                .digest('hex')}`;
+
+            return scm.canHandleWebhook(testHeaders, invalidPayload).then(result => {
+                assert.strictEqual(result, false);
+                assert.calledWithMatch(winstonMock.error, 'Failed to run canHandleWebhook', {
+                    reasonCode: 'INVALID_JSON',
+                    deliveryId: testHeaders['x-github-delivery'],
+                    event: 'pull_request'
+                });
+                assert.notMatch(JSON.stringify(winstonMock.error.lastCall.args), /org\/repo/);
             });
         });
 
